@@ -12,7 +12,8 @@ udacity
 .udacity
 flower_classifier_checkpoint.pth
 .flower_classifier_checkpoint.pth
-
+conda
+.conda
 
 # C extensions
 *.so
