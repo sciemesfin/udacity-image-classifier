@@ -5,7 +5,7 @@ Project code for Udacity's AI Programming with Python Nanodegree program. In thi
 
 ## Run Training
 
-`python3 train.py data/flowers --gpu --save_dir checkpoint.pth --learning_rate 0.001 --hidden_units 4096 --epochs 10`
+`python3 train.py data/flowers  --arch vgg16 --learning_rate 0.001 --hidden_units 2048 --epochs 10 --gpu`
 
 ## Run prediction 
 

@@ -1,18 +1,29 @@
 import torch
-import json
-import argparse
-import numpy as np
-import matplotlib.pyplot as plt
 from torchvision import models, transforms
 from PIL import Image
+import json
 
-def load_checkpoint(filepath):
-    checkpoint = torch.load(filepath, map_location='cuda' if torch.cuda.is_available() else 'cpu')
-
-    model = models.vgg16(pretrained=True)
+def load_model(filepath, device='cuda'):
+    checkpoint = torch.load(filepath, map_location=device)
+    
+    if checkpoint['structure'] == 'vgg16':
+        model = models.vgg16(pretrained=True)
+        for param in model.parameters():
+            param.requires_grad = False
+    else:
+        print("Architecture not recognized.")
+        return None
+    
     model.classifier = checkpoint['classifier']
     model.load_state_dict(checkpoint['model_state_dict'])
     model.class_to_idx = checkpoint['class_to_idx']
+    
+    optimizer = torch.optim.Adam(model.classifier.parameters(), lr=checkpoint['learning_rate'])
+    optimizer.load_state_dict(checkpoint['optimizer'])
+  
+    model.epochs = checkpoint['epochs']
+    
+    model.to(device)
     
     return model
 
@@ -29,48 +40,54 @@ def process_image(image_path):
     return image
 
 def predict(image_path, model, topk=5):
+    image = process_image(image_path)
     model.eval()
-    model.to('cuda' if torch.cuda.is_available() else 'cpu')
-
-    image = process_image(image_path).unsqueeze(0).to('cuda' if torch.cuda.is_available() else 'cpu')
     
+    # Convert image to PyTorch tensor
+    image = torch.unsqueeze(image, 0)
+    
+    # Perform inference without gradient tracking
     with torch.no_grad():
         output = model(image)
-
-    probabilities = torch.nn.functional.softmax(output.data, dim=1)
-    top_probabilities, top_indices = probabilities.topk(topk)
     
-    # Convert indices to classes
+    # Calculate probabilities and indices of the topk predictions
+    probabilities, indices = torch.topk(torch.exp(output), topk)
+  
+    # Convert indices to class labels
     idx_to_class = {val: key for key, val in model.class_to_idx.items()}
-    top_classes = [idx_to_class[idx] for idx in top_indices[0].tolist()]
+    classes = [idx_to_class[idx] for idx in indices.numpy()[0]]
+    
+    # Convert PyTorch tensor to NumPy array for printing
+    probabilities = probabilities.numpy()[0]
+    
+    return probabilities, classes
 
-    return top_probabilities[0].tolist(), top_classes
+if __name__ == "__main__":
+    import argparse
 
-def main():
-    parser = argparse.ArgumentParser(description="Predict flower class using a trained deep learning model")
-    parser.add_argument("image_path", type=str, help="Path to the input image")
-    parser.add_argument("checkpoint", type=str, help="Path to the checkpoint file")
-    parser.add_argument("--top_k", type=int, default=5, help="Return top K most likely classes")
-    parser.add_argument("--category_names", type=str, default="cat_to_name.json", help="Path to category names mapping file")
-    parser.add_argument("--gpu", action="store_true", help="Use GPU for inference if available")
+    parser = argparse.ArgumentParser(description="Image Classifier Prediction")
+    parser.add_argument("image_path", help="Path to the image for prediction")
+    parser.add_argument("checkpoint_path", help="Path to the model checkpoint file")
+    parser.add_argument("--top_k", type=int, default=5, help="Top K most likely classes")
+    parser.add_argument("--category_names", default="cat_to_name.json", help="Path to the category names mapping file")
+    parser.add_argument("--gpu", action="store_true", help="Use GPU for prediction if available")
 
     args = parser.parse_args()
 
+    # Use GPU if available and specified by the user
+    device = torch.device('cuda' if torch.cuda.is_available() and args.gpu else 'cpu')
+
+    # Load model
+    model = load_model(args.checkpoint_path, device=device)
+
+    # Load category names
     with open(args.category_names, 'r') as f:
         cat_to_name = json.load(f)
 
-    model = load_checkpoint(args.checkpoint)
+    # Make prediction
+    probs, classes = predict(args.image_path, model, topk=args.top_k)
 
-    if args.gpu and torch.cuda.is_available():
-        model.to('cuda')
-
-    top_probs, top_classes = predict(args.image_path, model, args.top_k)
-
-    class_names = [cat_to_name[cls] for cls in top_classes]
-
-    print(f"Top {args.top_k} predictions:")
-    for prob, cls_name in zip(top_probs, class_names):
-        print(f"Class: {cls_name}, Probability: {prob:.4f}")
-
-if __name__ == "__main__":
-    main()
+    # Display results
+    print("Probabilities:", probs)
+    print("Classes:", classes)
+    print("Class Names:", [cat_to_name[class_] for class_ in classes])
